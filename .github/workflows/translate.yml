@@ -1,0 +1,149 @@
+name: Translate to Romanian
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install requests
+
+      - name: Run Translator
+        run: |
+          python - << 'EOF'
+          import json, os, re, time, requests
+          from concurrent.futures import ThreadPoolExecutor
+
+          S = requests.Session()
+          S.mount("https://", requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=20))
+          URL = "https://googleapis.com"
+
+          SUBS = {
+              "ă":"a","â":"a","î":"i","ș":"s","ş":"s","ț":"t","ţ":"t",
+              "Ă":"A","Â":"A","Î":"I","Ș":"S","Ş":"S","Ț":"T","Ţ":"T"
+          }
+
+          def clean_ro(text):
+              for k, v in SUBS.items():
+                  text = text.replace(k, v)
+              return text
+
+          def protect(v):
+              toks = []
+              out = []
+              i = 0
+              n = len(v)
+              while i < n:
+                  ch = v[i]
+                  if ch == "\\":
+                      end = min(n, i + 3) if v[i+1:i+2] in "MEFCSWTfc" else min(n, i + 2)
+                      toks.append(v[i:end])
+                      out.append(f" XTOK{len(toks)-1}X ")
+                      i = end
+                  elif ch in "^~" and i + 1 < n and v[i+1].isdigit():
+                      toks.append(v[i:i+2])
+                      out.append(f" XTOK{len(toks)-1}X ")
+                      i += 2
+                  elif ch in "&/*%":
+                      toks.append(ch)
+                      out.append(f" XTOK{len(toks)-1}X ")
+                      i += 1
+                  else:
+                      out.append(ch)
+                      i += 1
+              c = "".join(out)
+              letters = [x for x in c if x.isalpha()]
+              wu = len(letters) > 2 and all(x.isupper() for x in letters)
+              if wu:
+                  c = " ".join(w if w.startswith("XTOK") else w.lower() for w in c.split(" "))
+              return c, toks, wu
+
+          def restore(t, toks, wu):
+              if wu:
+                  t = " ".join(w if "xtok" in w.lower() else w.upper() for w in t.split(" "))
+              for i, tk in enumerate(toks):
+                  t = re.sub(rf"\s*XTOK{i}X\s*", lambda _: tk, t, flags=re.IGNORECASE)
+              return clean_ro(t)
+
+          def gt(txt, sl="en"):
+              for attempt in range(4):
+                  try:
+                      r = S.get(
+                          URL,
+                          params={"client": "gtx", "sl": sl, "tl": "ro", "dt": "t", "q": txt},
+                          timeout=12
+                      )
+                      if r.status_code == 429:
+                          time.sleep(2 * (attempt + 1))
+                          continue
+                      r.raise_for_status()
+                      data = r.json()
+                      return "".join(seg[0] for seg in data[0] if seg and seg[0])
+                  except Exception:
+                      time.sleep(1)
+              raise RuntimeError("Translation failed")
+
+          def run_batch(args):
+              batch, sl = args
+              joined = "\n\n|||\n\n".join(item[2] for item in batch)
+              try:
+                  raw = gt(joined, sl)
+                  parts = [p.strip() for p in raw.split("|||")]
+                  if len(parts) == len(batch):
+                      return [(item[0], restore(part, item[3], item[4])) for item, part in zip(batch, parts)]
+              except Exception:
+                  pass
+              out = []
+              for k, orig, p, toks, wu in batch:
+                  try:
+                      out.append((k, restore(gt(p, sl), toks, wu)))
+                  except Exception:
+                      out.append((k, orig))
+              return out
+
+          files = ["strings.json"] + [f"chapter{i}/strings.json" for i in range(1, 6)]
+          for fp in files:
+              if not os.path.exists(fp):
+                  continue
+              sl = "auto" if fp == "strings.json" else "en"
+              with open(fp, "r", encoding="utf-8") as f:
+                  data = json.load(f)
+              items = [(k, v) for k, v in data.items() if isinstance(v, str) and v.strip()]
+              batches, cur, clen = [], [], 0
+              for k, v in items:
+                  p, toks, wu = protect(v)
+                  if cur and clen + len(p) + 9 > 1600:
+                      batches.append((cur, sl))
+                      cur, clen = [], 0
+                  cur.append((k, v, p, toks, wu))
+                  clen += len(p) + 9
+              if cur:
+                  batches.append((cur, sl))
+              with ThreadPoolExecutor(max_workers=8) as ex:
+                  for res in ex.map(run_batch, batches):
+                      for k, nv in res:
+                          data[k] = nv
+              with open(fp, "w", encoding="utf-8") as f:
+                  json.dump(data, f, ensure_ascii=False, indent=2)
+              print(f"Finished {fp} ({len(batches)} batches)")
+          EOF
+
+      - name: Pack Zip and Commit
+        run: |
+          rm -f delta-romanian.zip
+          zip -r delta-romanian.zip chapter1 chapter2 chapter3 chapter4 chapter5 settings.json strings.json
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add -A
+          git commit -m "Build Romanian translation pack" || echo "No changes"
+          git push
+          
