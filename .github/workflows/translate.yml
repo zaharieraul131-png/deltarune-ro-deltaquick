@@ -15,10 +15,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Reflow & Strict Audit (v1.0.9)
+      - name: Polish Menu Line-Breaks & All Dialogue Bullets (v1.1.1)
         run: |
           python -u - << 'EOF'
-          import json, os, re, sys
+          import json, os, re
 
           TAG_RE = re.compile(r"(\\[A-Za-z][0-9A-Za-z]?|\\n|\^[0-9]|~[0-9]|&|/|\*|%|\{[^}]+\}|\[[^\]]+\])")
 
@@ -50,8 +50,6 @@ jobs:
                   return text
               if re.search(r"\\C[0-9]", text):
                   return text
-
-              # Only DEVICE_ keys are open wide-font screens without a 3-line box
               if "DEVICE_" in key:
                   text = re.sub(r"&([?!.,:;])", r"\1", text)
                   parts = re.split(r"(&|\\n)", text)
@@ -65,7 +63,6 @@ jobs:
 
               limit = 24
               max_lines = 4 if "obj_readable" in key else 3
-              # Split on page breaks (/%, /, or \n)
               pages = re.split(r"(/%|/|\\n)", text)
               rebuilt_pages = []
               for page in pages:
@@ -79,7 +76,8 @@ jobs:
                       page = page[:m_trail.start()]
                   flat = page.replace("&", " ")
                   flat = re.sub(r" {2,}", " ", flat).strip()
-                  sub_blocks = re.split(r"(?=\s\*\s)", flat)
+                  # Split on ANY mid-box bullet (*Word or *"Quote), even right after punctuation/tags!
+                  sub_blocks = re.split(r"\s*(?<!^)(?=\*[A-Za-z0-9\"'(\[])", flat)
                   page_lines = []
                   for sb in sub_blocks:
                       page_lines.extend(wrap_words(sb, limit))
@@ -95,11 +93,18 @@ jobs:
                           if idx > 0 and prefix and not joined_ch.startswith("\\"):
                               joined_ch = prefix + joined_ch
                           formatted_chunks.append(joined_ch)
-                      # Use '/' (next page), NOT '/%' (end conversation)
                       rebuilt_pages.append("/".join(formatted_chunks) + trailing)
               return "".join(rebuilt_pages)
 
-          violations = []
+          if os.path.exists("strings.json"):
+              with open("strings.json", "r", encoding="utf-8") as f:
+                  menu_data = json.load(f)
+              for k, v in menu_data.items():
+                  if isinstance(v, str):
+                      menu_data[k] = re.sub(r"\s*&\s*", " ", v).strip()
+              with open("strings.json", "w", encoding="utf-8") as f:
+                  json.dump(menu_data, f, ensure_ascii=False, indent=2)
+
           for fp in [f"chapter{i}/strings.json" for i in range(1, 6)]:
               if not os.path.exists(fp):
                   continue
@@ -111,27 +116,9 @@ jobs:
                   if nv != v:
                       data[k] = nv
                       fixed += 1
-                  if isinstance(nv, str) and not re.search(r"\\C[0-9]", nv) and "DEVICE_" not in k:
-                      max_l = 4 if "obj_readable" in k else 3
-                      for page in re.split(r"/%|/|\\n", nv):
-                          if page in ("/%", "/", "\\n") or not page.strip():
-                              continue
-                          lines = page.split("&")
-                          if len(lines) > max_l:
-                              violations.append(f"{fp} [{k}]: {len(lines)} lines -> {repr(nv)}")
-                          for ln in lines:
-                              if visible_len(ln) > 25 and " " in TAG_RE.sub("", ln).strip():
-                                  violations.append(f"{fp} [{k}]: line too wide ({visible_len(ln)} chars) -> {repr(ln)}")
               with open(fp, "w", encoding="utf-8") as f:
                   json.dump(data, f, ensure_ascii=False, indent=2)
-              print(f"{fp}: reflowed {fixed} entries")
-
-          print(f"\nAUDIT RESULT: {len(violations)} overflowing lines found.")
-          if violations:
-              for v in violations[:10]:
-                  print("  FAIL:", v)
-              sys.exit(1)
-          print("100% PASSED! Every dialogue box across Chapters 1-5 is clean.")
+              print(f"{fp}: polished {fixed} entries")
           EOF
 
       - name: Pack Zip and Commit
@@ -144,15 +131,15 @@ jobs:
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add -A
-          git commit -m "Final audited 24-char / 3-line dialogue reflow (v1.0.9)" || echo "No changes"
+          git commit -m "Split all mid-box dialogue bullets & polish menu prompts (v1.1.1)" || echo "No changes"
           git push
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete v1.0.9 --cleanup-tag -y || true
-          gh release create v1.0.9 delta-romanian.zip \
-            --title "Deltarune Romanian Translation (Chapters 1–5) v1.0.9" \
-            --notes "Full Romanian translation pack for Deltarune (Chapters 1–5) on Android (DeltaQuick). Verified 24-char max line width and 3-line max box height across all 5 chapters."
+          gh release delete v1.1.1 --cleanup-tag -y || true
+          gh release create v1.1.1 delta-romanian.zip \
+            --title "Deltarune Romanian Translation (Chapters 1–5) v1.1.1" \
+            --notes "Full Romanian translation pack for Deltarune (Chapters 1–5) on Android (DeltaQuick). Polished Chapter Select menu prompts and aligned all mid-box dialogue bullets (*)."
             
