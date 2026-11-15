@@ -1,3 +1,4 @@
+
 name: Scan, Wrap & Publish Release
 on:
   workflow_dispatch:
@@ -54,7 +55,6 @@ jobs:
               is_wide_caps = ("DEVICE_" in key) or (len(letters) > 3 and all(c.isupper() for c in letters))
 
               if is_wide_caps:
-                  # Keep existing & breaks on wide-font screens and wrap at 19 chars
                   text = re.sub(r"&([?!.,:;])", r"\1", text)
                   parts = re.split(r"(&|\\n)", text)
                   out = []
@@ -66,32 +66,26 @@ jobs:
                   return "".join(out)
 
               limit = 27 if has_face else 33
-              # Split by page breaks (/ or /% or \n) so we reflow each dialogue page cleanly
               pages = re.split(r"(/%|/|\\n)", text)
               rebuilt_pages = []
               for page in pages:
                   if page in ("/%", "/", "\\n") or not page.strip():
                       rebuilt_pages.append(page)
                       continue
-                  # Separate trailing % or wait codes so they stay at the end
                   trailing = ""
                   m_trail = re.search(r"(\s*%+\s*)$", page)
                   if m_trail:
                       trailing = m_trail.group(1)
                       page = page[:m_trail.start()]
-                  # Join old & breaks into a single paragraph so Romanian wraps naturally
                   flat = re.sub(r"\s*&\s*", " ", page)
-                  # Keep manual bullet starts (* ) separated if multiple exist mid-page
                   sub_blocks = re.split(r"(?=\s\*\s)", flat)
                   page_lines = []
                   for sb in sub_blocks:
                       page_lines.extend(wrap_words(sb, limit))
-                  # Paginate into chunks of max 3 lines per dialogue box!
                   if len(page_lines) <= 3:
                       rebuilt_pages.append("&".join(page_lines) + trailing)
                   else:
                       chunks = [page_lines[i:i+3] for i in range(0, len(page_lines), 3)]
-                      # Preserve speaker/face prefix on follow-up pages if present
                       prefix_m = re.match(r"^((?:\\[A-Za-z][0-9A-Za-z]?)+)", page.strip())
                       prefix = prefix_m.group(1) if prefix_m else ""
                       formatted_chunks = []
@@ -133,15 +127,11 @@ jobs:
           git push
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v1.0.3
-          name: "Deltarune Romanian Translation (Chapters 1–5) v1.0.3"
-          body: |
-            Full Romanian translation pack for **Deltarune (Chapters 1–5)** on Android (**DeltaQuick**).
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete v1.0.4 --cleanup-tag -y || true
+          gh release create v1.0.4 delta-romanian.zip \
+            --title "Deltarune Romanian Translation (Chapters 1–5) v1.0.4" \
+            --notes "Full Romanian translation pack for Deltarune (Chapters 1–5) on Android (DeltaQuick). Includes full 5-chapter line wrapping (27/33 width + max 3 lines per dialogue box)."
             
-            ### What's Fixed in v1.0.3:
-            - Reflowed all dialogue boxes across Chapters 1–5 to use the full horizontal width (27 chars with portrait, 33 chars without) so short sentences don't wrap onto 4 lines.
-            - Automatically splits any 4+ line dialogue onto a second text-box page (`/`) so text never overlaps the bottom border.
-          files: delta-romanian.zip
-          
