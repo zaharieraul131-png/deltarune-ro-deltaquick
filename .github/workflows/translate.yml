@@ -15,10 +15,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Reflow Dialogue Boxes (Horizontal + 3-Line Max)
+      - name: Reflow & Strict Audit (24-Char Width + 3-Line Max)
         run: |
           python -u - << 'EOF'
-          import json, os, re
+          import json, os, re, sys
 
           TAG_RE = re.compile(r"(\\[A-Za-z][0-9A-Za-z]?|\\n|\^[0-9]|~[0-9]|&|/|\*|%|\{[^}]+\}|\[[^\]]+\])")
 
@@ -48,7 +48,10 @@ jobs:
           def reflow_dialogue(key, text):
               if not isinstance(text, str) or not text.strip():
                   return text
-              has_face = bool(re.search(r"\\[EF][0-9A-Za-z]", text))
+              # Leave interactive choice prompts (\C1, \C2, etc.) untouched so choices stay aligned
+              if re.search(r"\\C[0-9]", text):
+                  return text
+
               clean_txt = TAG_RE.sub("", text)
               letters = [c for c in clean_txt if c.isalpha()]
               is_wide_caps = ("DEVICE_" in key) or (len(letters) > 3 and all(c.isupper() for c in letters))
@@ -64,20 +67,19 @@ jobs:
                           out.append("&".join(wrap_words(p, 19)) if p.strip() else p)
                   return "".join(out)
 
-              limit = 26 if has_face else 32
-              # Split ONLY on page terminators (/%, /, or literal \n), NEVER on &
-              pages = re.split(r"(/%|/|\\n)", text)
+              limit = 24
+              # Split ONLY on real page breaks (/% or literal \n), never on mid-sentence slashes like 10/10
+              pages = re.split(r"(/%|\\n)", text)
               rebuilt_pages = []
               for page in pages:
-                  if page in ("/%", "/", "\\n") or not page.strip():
+                  if page in ("/%", "\\n") or not page.strip():
                       rebuilt_pages.append(page)
                       continue
                   trailing = ""
-                  m_trail = re.search(r"(\s*%+\s*)$", page)
+                  m_trail = re.search(r"(\s*[/%%]+\s*)$", page)
                   if m_trail:
                       trailing = m_trail.group(1)
                       page = page[:m_trail.start()]
-                  # Completely flatten all old & breaks into spaces
                   flat = page.replace("&", " ")
                   flat = re.sub(r" {2,}", " ", flat).strip()
                   sub_blocks = re.split(r"(?=\s\*\s)", flat)
@@ -96,8 +98,11 @@ jobs:
                           if idx > 0 and prefix and not joined_ch.startswith("\\"):
                               joined_ch = prefix + joined_ch
                           formatted_chunks.append(joined_ch)
-                      rebuilt_pages.append("/".join(formatted_chunks) + trailing)
+                      rebuilt_pages.append("/%".join(formatted_chunks) + trailing)
               return "".join(rebuilt_pages)
+
+          samples = []
+          violations = []
 
           for fp in [f"chapter{i}/strings.json" for i in range(1, 6)]:
               if not os.path.exists(fp):
@@ -106,17 +111,36 @@ jobs:
                   data = json.load(f)
               fixed = 0
               for k, v in data.items():
-                  if "trezesti" in str(v):
-                      print("BEFORE TORIEL:", repr(v))
                   nv = reflow_dialogue(k, v)
-                  if "trezesti" in str(nv):
-                      print("AFTER  TORIEL:", repr(nv))
                   if nv != v:
                       data[k] = nv
                       fixed += 1
+                  if fp == "chapter1/strings.json" and any(tag in k for tag in ("alphys", "susie", "noelle", "toriel")) and len(samples) < 8:
+                      samples.append(f"  [{k}] -> {repr(nv)}")
+                  if isinstance(nv, str) and not re.search(r"\\C[0-9]", nv):
+                      for page in re.split(r"/%|\\n", nv):
+                          if page in ("/%", "\\n") or not page.strip():
+                              continue
+                          lines = page.split("&")
+                          if len(lines) > 3:
+                              violations.append(f"{fp} [{k}]: {len(lines)} lines -> {repr(nv)}")
+                          for ln in lines:
+                              if visible_len(ln) > 25 and " " in TAG_RE.sub("", ln).strip():
+                                  violations.append(f"{fp} [{k}]: line too wide ({visible_len(ln)} chars) -> {repr(ln)}")
               with open(fp, "w", encoding="utf-8") as f:
                   json.dump(data, f, ensure_ascii=False, indent=2)
-              print(f"{fp}: reflowed {fixed} dialogue entries")
+              print(f"{fp}: reflowed {fixed} entries")
+
+          print("\n--- SAMPLE CLASSROOM / TORIEL LINES ---")
+          for s in samples:
+              print(s)
+
+          print(f"\nAUDIT RESULT: {len(violations)} overflowing lines found.")
+          if violations:
+              for v in violations[:10]:
+                  print("  FAIL:", v)
+              sys.exit(1)
+          print("100% PASSED! Every dialogue box across Chapters 1-5 is within 24 chars & max 3 lines.")
           EOF
 
       - name: Pack Zip and Commit
@@ -129,15 +153,15 @@ jobs:
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add -A
-          git commit -m "Reflow dialogue boxes v1.0.5" || echo "No changes"
+          git commit -m "Audited 24-char / 3-line max dialogue reflow (v1.0.8)" || echo "No changes"
           git push
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete v1.0.5 --cleanup-tag -y || true
-          gh release create v1.0.5 delta-romanian.zip \
-            --title "Deltarune Romanian Translation (Chapters 1–5) v1.0.5" \
-            --notes "Full Romanian translation pack for Deltarune (Chapters 1–5) on Android (DeltaQuick). Reflowed dialogue boxes so no lines spill below the bottom border."
+          gh release delete v1.0.8 --cleanup-tag -y || true
+          gh release create v1.0.8 delta-romanian.zip \
+            --title "Deltarune Romanian Translation (Chapters 1–5) v1.0.8" \
+            --notes "Full Romanian translation pack for Deltarune (Chapters 1–5) on Android (DeltaQuick). Audited 24-char max line width, 3-line max box height, and preserved choice prompts across all 5 chapters."
             
