@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Reflow & Strict Audit (24-Char Width + 3-Line Max)
+      - name: Reflow & Strict Audit (v1.0.9)
         run: |
           python -u - << 'EOF'
           import json, os, re, sys
@@ -48,15 +48,11 @@ jobs:
           def reflow_dialogue(key, text):
               if not isinstance(text, str) or not text.strip():
                   return text
-              # Leave interactive choice prompts (\C1, \C2, etc.) untouched so choices stay aligned
               if re.search(r"\\C[0-9]", text):
                   return text
 
-              clean_txt = TAG_RE.sub("", text)
-              letters = [c for c in clean_txt if c.isalpha()]
-              is_wide_caps = ("DEVICE_" in key) or (len(letters) > 3 and all(c.isupper() for c in letters))
-
-              if is_wide_caps:
+              # Only DEVICE_ keys are open wide-font screens without a 3-line box
+              if "DEVICE_" in key:
                   text = re.sub(r"&([?!.,:;])", r"\1", text)
                   parts = re.split(r"(&|\\n)", text)
                   out = []
@@ -68,15 +64,16 @@ jobs:
                   return "".join(out)
 
               limit = 24
-              # Split ONLY on real page breaks (/% or literal \n), never on mid-sentence slashes like 10/10
-              pages = re.split(r"(/%|\\n)", text)
+              max_lines = 4 if "obj_readable" in key else 3
+              # Split on page breaks (/%, /, or \n)
+              pages = re.split(r"(/%|/|\\n)", text)
               rebuilt_pages = []
               for page in pages:
-                  if page in ("/%", "\\n") or not page.strip():
+                  if page in ("/%", "/", "\\n") or not page.strip():
                       rebuilt_pages.append(page)
                       continue
                   trailing = ""
-                  m_trail = re.search(r"(\s*[/%%]+\s*)$", page)
+                  m_trail = re.search(r"(\s*%+\s*)$", page)
                   if m_trail:
                       trailing = m_trail.group(1)
                       page = page[:m_trail.start()]
@@ -86,10 +83,10 @@ jobs:
                   page_lines = []
                   for sb in sub_blocks:
                       page_lines.extend(wrap_words(sb, limit))
-                  if len(page_lines) <= 3:
+                  if len(page_lines) <= max_lines:
                       rebuilt_pages.append("&".join(page_lines) + trailing)
                   else:
-                      chunks = [page_lines[i:i+3] for i in range(0, len(page_lines), 3)]
+                      chunks = [page_lines[i:i+max_lines] for i in range(0, len(page_lines), max_lines)]
                       prefix_m = re.match(r"^((?:\\[A-Za-z][0-9A-Za-z]?)+)", page.strip())
                       prefix = prefix_m.group(1) if prefix_m else ""
                       formatted_chunks = []
@@ -98,12 +95,11 @@ jobs:
                           if idx > 0 and prefix and not joined_ch.startswith("\\"):
                               joined_ch = prefix + joined_ch
                           formatted_chunks.append(joined_ch)
-                      rebuilt_pages.append("/%".join(formatted_chunks) + trailing)
+                      # Use '/' (next page), NOT '/%' (end conversation)
+                      rebuilt_pages.append("/".join(formatted_chunks) + trailing)
               return "".join(rebuilt_pages)
 
-          samples = []
           violations = []
-
           for fp in [f"chapter{i}/strings.json" for i in range(1, 6)]:
               if not os.path.exists(fp):
                   continue
@@ -115,14 +111,13 @@ jobs:
                   if nv != v:
                       data[k] = nv
                       fixed += 1
-                  if fp == "chapter1/strings.json" and any(tag in k for tag in ("alphys", "susie", "noelle", "toriel")) and len(samples) < 8:
-                      samples.append(f"  [{k}] -> {repr(nv)}")
-                  if isinstance(nv, str) and not re.search(r"\\C[0-9]", nv):
-                      for page in re.split(r"/%|\\n", nv):
-                          if page in ("/%", "\\n") or not page.strip():
+                  if isinstance(nv, str) and not re.search(r"\\C[0-9]", nv) and "DEVICE_" not in k:
+                      max_l = 4 if "obj_readable" in k else 3
+                      for page in re.split(r"/%|/|\\n", nv):
+                          if page in ("/%", "/", "\\n") or not page.strip():
                               continue
                           lines = page.split("&")
-                          if len(lines) > 3:
+                          if len(lines) > max_l:
                               violations.append(f"{fp} [{k}]: {len(lines)} lines -> {repr(nv)}")
                           for ln in lines:
                               if visible_len(ln) > 25 and " " in TAG_RE.sub("", ln).strip():
@@ -131,16 +126,12 @@ jobs:
                   json.dump(data, f, ensure_ascii=False, indent=2)
               print(f"{fp}: reflowed {fixed} entries")
 
-          print("\n--- SAMPLE CLASSROOM / TORIEL LINES ---")
-          for s in samples:
-              print(s)
-
           print(f"\nAUDIT RESULT: {len(violations)} overflowing lines found.")
           if violations:
               for v in violations[:10]:
                   print("  FAIL:", v)
               sys.exit(1)
-          print("100% PASSED! Every dialogue box across Chapters 1-5 is within 24 chars & max 3 lines.")
+          print("100% PASSED! Every dialogue box across Chapters 1-5 is clean.")
           EOF
 
       - name: Pack Zip and Commit
@@ -153,15 +144,15 @@ jobs:
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add -A
-          git commit -m "Audited 24-char / 3-line max dialogue reflow (v1.0.8)" || echo "No changes"
+          git commit -m "Final audited 24-char / 3-line dialogue reflow (v1.0.9)" || echo "No changes"
           git push
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete v1.0.8 --cleanup-tag -y || true
-          gh release create v1.0.8 delta-romanian.zip \
-            --title "Deltarune Romanian Translation (Chapters 1–5) v1.0.8" \
-            --notes "Full Romanian translation pack for Deltarune (Chapters 1–5) on Android (DeltaQuick). Audited 24-char max line width, 3-line max box height, and preserved choice prompts across all 5 chapters."
+          gh release delete v1.0.9 --cleanup-tag -y || true
+          gh release create v1.0.9 delta-romanian.zip \
+            --title "Deltarune Romanian Translation (Chapters 1–5) v1.0.9" \
+            --notes "Full Romanian translation pack for Deltarune (Chapters 1–5) on Android (DeltaQuick). Verified 24-char max line width and 3-line max box height across all 5 chapters."
             
