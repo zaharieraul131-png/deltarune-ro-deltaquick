@@ -25,7 +25,8 @@ jobs:
 
           S = requests.Session()
           S.mount("https://", requests.adapters.HTTPAdapter(pool_connections=15, pool_maxsize=15))
-          URL = "https://translate." + "://googleapis.com"
+          URL = "https://" + ".".join(["translate", "googleapis", "com"]) + "/translate_a/single"
+                    
 
           SUBS = {
               "ă":"a","â":"a","î":"i","ș":"s","ş":"s","ț":"t","ţ":"t",
