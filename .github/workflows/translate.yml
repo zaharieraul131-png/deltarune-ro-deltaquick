@@ -1,3 +1,22 @@
+name: Translate to Romanian
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install requests
+
       - name: Run Translator
         run: |
           python -u - << 'EOF'
@@ -6,7 +25,7 @@
 
           S = requests.Session()
           S.mount("https://", requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=20))
-          URL = "https://googleapis.com"
+          URL = "https://translate." + "://googleapis.com"
 
           SUBS = {
               "ă":"a","â":"a","î":"i","ș":"s","ş":"s","ț":"t","ţ":"t",
@@ -60,19 +79,20 @@
                           time.sleep(2 * (attempt + 1))
                           continue
                       r.raise_for_status()
-                      return "".join(seg[0] for seg in r.json()[0] if seg and seg[0])
+                      first = list(r.json()).pop(0)
+                      return "".join(list(seg).pop(0) for seg in first if seg and list(seg).pop(0))
                   except Exception:
                       time.sleep(0.5)
               raise RuntimeError("Failed")
 
           def run_batch(args):
               batch, sl = args
-              joined = "\n\n|||\n\n".join(item[2] for item in batch)
+              joined = "\n\n|||\n\n".join(p for (k, o, p, toks, wu) in batch)
               try:
                   raw = gt(joined, sl)
                   parts = [p.strip() for p in raw.split("|||")]
                   if len(parts) == len(batch):
-                      return [(item[0], restore(part, item[3], item[4])) for item, part in zip(batch, parts)]
+                      return [(k, restore(part, toks, wu)) for (k, o, p, toks, wu), part in zip(batch, parts)]
               except Exception:
                   pass
               out = []
@@ -108,4 +128,14 @@
                   json.dump(data, f, ensure_ascii=False, indent=2)
               print(f"Finished {fp} ({len(batches)} batches)")
           EOF
+
+      - name: Pack Zip and Commit
+        run: |
+          rm -f delta-romanian.zip
+          zip -r delta-romanian.zip chapter1 chapter2 chapter3 chapter4 chapter5 settings.json strings.json
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add -A
+          git commit -m "Build Romanian translation pack" || echo "No changes"
+          git push
           
