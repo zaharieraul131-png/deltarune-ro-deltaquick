@@ -2,6 +2,8 @@ import json, re, os, requests
 from concurrent.futures import ThreadPoolExecutor
 
 SESSION = requests.Session()
+adapter = requests.adapters.HTTPAdapter(pool_connections=30, pool_maxsize=30)
+SESSION.mount("https://", adapter)
 
 def clean_ro(text):
     subs = {'ă':'a','â':'a','î':'i','ș':'s','ş':'s','ț':'t','ţ':'t',
@@ -24,15 +26,16 @@ def restore(text, tokens):
     return clean_ro(text)
 
 def fast_gt(text):
-    r = SESSION.get(
+    r = SESSION.post(
         "https://googleapis.com",
-        params={"client": "gtx", "sl": "auto", "tl": "ro", "dt": "t", "q": text},
+        params={"client": "gtx", "sl": "auto", "tl": "ro", "dt": "t"},
+        data={"q": text},
         timeout=10
     )
     r.raise_for_status()
-    return "".join(seg[0] for seg in r.json()[0] if seg[0])
+    return "".join(seg for seg in r.json() if seg and seg)
 
-def make_batches(items, max_chars=2500):
+def make_batches(items, max_chars=4500):
     batches, cur, cur_len = [], [], 0
     for k, v in items:
         p, toks = protect(v)
@@ -46,12 +49,12 @@ def make_batches(items, max_chars=2500):
     return batches
 
 def translate_batch(batch):
-    joined = "\n###\n".join(x[2] for x in batch)
+    joined = "\n###\n".join(x for x in batch)
     try:
         res = fast_gt(joined)
         parts = re.split(r'\s*###\s*', res)
         if len(parts) == len(batch):
-            return [(batch[i][0], restore(parts[i], batch[i][3])) for i in range(len(batch))]
+            return [(batch[i], restore(parts[i], batch[i])) for i in range(len(batch))]
     except Exception:
         pass
     out = []
@@ -70,7 +73,7 @@ for fpath in files:
     str_items = [(k, v) for k, v in data.items() if isinstance(v, str) and v.strip()]
     batches = make_batches(str_items)
     done = 0
-    with ThreadPoolExecutor(max_workers=20) as ex:
+    with ThreadPoolExecutor(max_workers=25) as ex:
         for res_batch in ex.map(translate_batch, batches):
             for k, new_v in res_batch:
                 data[k] = new_v
