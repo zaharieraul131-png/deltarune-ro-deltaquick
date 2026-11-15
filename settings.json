@@ -1,0 +1,10 @@
+{
+    "name": "Español",
+    "lang_code": "es_mx",
+    "description": "Español - América",
+    "link": "",
+    "monospace_fonts": true,
+    "enable_translated_songs_switch": true,
+    "line_height_factor": 1,
+    "files_url": "https://raw.githubusercontent.com/BroxiCoros/LetraDelta/refs/heads/main/lang/"
+}
