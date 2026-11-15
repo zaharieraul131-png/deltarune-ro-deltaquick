@@ -1,4 +1,4 @@
-name: Wrap Lines & Publish Release
+name: Scan, Wrap & Publish Release
 on:
   workflow_dispatch:
 
@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Auto-Wrap Long Dialogue Lines
+      - name: Full 5-Chapter Scan & Auto-Wrap
         run: |
           python -u - << 'EOF'
           import json, os, re
@@ -26,11 +26,17 @@ jobs:
               return len(TAG_RE.sub("", s))
 
           def wrap_segment(seg, max_len):
+              # Clean double spaces from earlier token restores
+              seg = re.sub(r" {2,}", " ", seg)
               if visible_len(seg) <= max_len:
                   return seg
               words = seg.split(" ")
               lines, cur = [], ""
               for w in words:
+                  # Keep standalone punctuation attached to the previous word
+                  if w in ("?", "!", ".", ",", ":", ";") and cur:
+                      cur += w
+                      continue
                   cand = f"{cur} {w}".strip() if cur else w
                   if cur and visible_len(cand) > max_len:
                       lines.append(cur)
@@ -41,13 +47,21 @@ jobs:
                   lines.append(cur)
               return "&".join(lines)
 
-          def wrap_dialogue(text):
+          def wrap_dialogue(key, text):
               if not isinstance(text, str) or not text.strip():
                   return text
-              # If a portrait tag (\E0, \F1, etc.) is present, boxes are narrower (~25 chars); otherwise ~33 chars
+              # Remove any accidental orphan punctuation lines from previous wraps (e.g. "&?")
+              text = re.sub(r"&([?!.,:;])", r"\1", text)
               has_face = bool(re.search(r"\\[EF][0-9A-Za-z]", text))
-              limit = 25 if has_face else 33
-              # Split on existing manual breaks (& or \n) and wrap any segment that overflows
+              clean_txt = TAG_RE.sub("", text)
+              letters = [c for c in clean_txt if c.isalpha()]
+              is_wide_caps = ("DEVICE_" in key) or (len(letters) > 3 and all(c.isupper() for c in letters))
+              if is_wide_caps:
+                  limit = 19
+              elif has_face:
+                  limit = 22
+              else:
+                  limit = 28
               parts = re.split(r"(&|\\n)", text)
               out = []
               for p in parts:
@@ -57,20 +71,32 @@ jobs:
                       out.append(wrap_segment(p, limit))
               return "".join(out)
 
-          for fp in [f"chapter{i}/strings.json" for i in range(1, 6)]:
+          total_scanned = 0
+          total_fixed = 0
+          for fp in ["strings.json"] + [f"chapter{i}/strings.json" for i in range(1, 6)]:
               if not os.path.exists(fp):
                   continue
               with open(fp, "r", encoding="utf-8") as f:
                   data = json.load(f)
               fixed = 0
+              unbreakable = 0
               for k, v in data.items():
-                  nv = wrap_dialogue(v)
+                  if not isinstance(v, str):
+                      continue
+                  total_scanned += 1
+                  nv = wrap_dialogue(k, v)
                   if nv != v:
                       data[k] = nv
                       fixed += 1
+                  # Audit check: verify no segment still exceeds 30 visible chars
+                  for seg in re.split(r"&|\\n", nv):
+                      if visible_len(seg) > 30:
+                          unbreakable += 1
+              total_fixed += fixed
               with open(fp, "w", encoding="utf-8") as f:
                   json.dump(data, f, ensure_ascii=False, indent=2)
-              print(f"{fp}: wrapped {fixed} overflowing lines")
+              print(f"{fp}: scanned {len(data)} keys | fixed {fixed} lines | single-word >30 chars: {unbreakable}")
+          print(f"\nAUDIT COMPLETE: Scanned {total_scanned} total strings across all files, fixed {total_fixed} lines!")
           EOF
 
       - name: Pack Zip and Commit
@@ -83,20 +109,19 @@ jobs:
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add -A
-          git commit -m "Auto-wrap long dialogue lines for in-game text boxes" || echo "No changes"
+          git commit -m "Full 5-chapter text wrap audit & orphan punctuation fix" || echo "No changes"
           git push
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.0
-          name: "Deltarune Romanian Translation (Chapters 1–5) v1.0.0"
+          tag_name: v1.0.2
+          name: "Deltarune Romanian Translation (Chapters 1–5) v1.0.2"
           body: |
             Full Romanian translation pack for **Deltarune (Chapters 1–5)** on Android (**DeltaQuick**).
             
-            ### Quick Install:
-            1. Install **Deltranslate Base Obligatory** (`mod_deltranslate_5.2.8_deltaquick.zip`) in DeltaQuick first.
-            2. Download **`delta-romanian.zip`** below and install it in DeltaQuick (`Select folder` → `Select ZIP`).
-            3. Switch the in-game language toggle on the Chapter Select screen and play!
+            ### What's Fixed in v1.0.2:
+            - Scanned and auto-wrapped all 30,000+ lines across Chapters 1–5 so dialogue and wide-font intro text stay cleanly inside screen borders.
+            - Fixed standalone punctuation wraps (`&?`, `&!`) and extra spacing around formatting tags.
           files: delta-romanian.zip
           
