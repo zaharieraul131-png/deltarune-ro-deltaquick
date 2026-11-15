@@ -1,4 +1,4 @@
-name: Translate to Romanian
+name: Wrap Lines & Publish Release
 on:
   workflow_dispatch:
 
@@ -6,7 +6,7 @@ permissions:
   contents: write
 
 jobs:
-  translate:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,113 +15,62 @@ jobs:
         with:
           python-version: '3.11'
 
-      - run: pip install requests
-
-      - name: Run Translator
+      - name: Auto-Wrap Long Dialogue Lines
         run: |
           python -u - << 'EOF'
-          import json, os, re, time, requests
-          from concurrent.futures import ThreadPoolExecutor
+          import json, os, re
 
-          S = requests.Session()
-          S.mount("https://", requests.adapters.HTTPAdapter(pool_connections=15, pool_maxsize=15))
-          URL = "https://" + ".".join(["translate", "googleapis", "com"]) + "/translate_a/single"
+          TAG_RE = re.compile(r"(\\[A-Za-z][0-9A-Za-z]?|\\n|\^[0-9]|~[0-9]|&|/|\*|%|\{[^}]+\}|\[[^\]]+\])")
 
-          SUBS = {
-              "ă":"a","â":"a","î":"i","ș":"s","ş":"s","ț":"t","ţ":"t",
-              "Ă":"A","Â":"A","Î":"I","Ș":"S","Ş":"S","Ț":"T","Ţ":"T"
-          }
+          def visible_len(s):
+              return len(TAG_RE.sub("", s))
 
-          def clean_ro(text):
-              for k, v in SUBS.items():
-                  text = text.replace(k, v)
-              return text
-
-          def protect(v):
-              toks, out, i, n = [], [], 0, len(v)
-              while i < n:
-                  ch = v[i]
-                  if ch == "\\":
-                      end = min(n, i + 3) if v[i+1:i+2] in "MEFCSWTfc" else min(n, i + 2)
-                      toks.append(v[i:end])
-                      out.append(f" XTOK{len(toks)-1}X ")
-                      i = end
-                  elif ch in "^~" and i + 1 < n and v[i+1].isdigit():
-                      toks.append(v[i:i+2])
-                      out.append(f" XTOK{len(toks)-1}X ")
-                      i += 2
-                  elif ch in "&/*%":
-                      toks.append(ch)
-                      out.append(f" XTOK{len(toks)-1}X ")
-                      i += 1
+          def wrap_segment(seg, max_len):
+              if visible_len(seg) <= max_len:
+                  return seg
+              words = seg.split(" ")
+              lines, cur = [], ""
+              for w in words:
+                  cand = f"{cur} {w}".strip() if cur else w
+                  if cur and visible_len(cand) > max_len:
+                      lines.append(cur)
+                      cur = w
                   else:
-                      out.append(ch)
-                      i += 1
-              c = "".join(out)
-              letters = [x for x in c if x.isalpha()]
-              wu = len(letters) > 2 and all(x.isupper() for x in letters)
-              if wu:
-                  c = " ".join(w if w.startswith("XTOK") else w.lower() for w in c.split(" "))
-              return c, toks, wu
+                      cur = cand
+              if cur:
+                  lines.append(cur)
+              return "&".join(lines)
 
-          def restore(t, toks, wu):
-              if wu:
-                  t = " ".join(w if "xtok" in w.lower() else w.upper() for w in t.split(" "))
-              for i, tk in enumerate(toks):
-                  t = re.sub(rf"\s*XTOK{i}X\s*", lambda _: tk, t, flags=re.IGNORECASE)
-              return clean_ro(t)
-
-          def gt(txt, sl="en"):
-              for attempt in range(3):
-                  r = S.get(URL, params={"client": "gtx", "sl": sl, "tl": "ro", "dt": "t", "q": txt}, timeout=10)
-                  if r.status_code == 200:
-                      first = list(r.json()).pop(0)
-                      return "".join(list(seg).pop(0) for seg in first if seg and list(seg).pop(0))
-                  if r.status_code == 429 and attempt < 2:
-                      time.sleep(3 * (attempt + 1))
-                      continue
-                  raise RuntimeError(f"Google API returned HTTP {r.status_code}: {r.text[:200]}")
-
-          print("Pre-flight check: testing Google Translate...")
-          test_out = clean_ro(gt("Select the head that you prefer.", "en"))
-          print(f"Pre-flight OK! Sample output: '{test_out}'")
-
-          def run_batch(args):
-              batch, sl = args
-              joined = "\n\n|||\n\n".join(p for (k, o, p, toks, wu) in batch)
-              raw = gt(joined, sl)
-              parts = [p.strip() for p in raw.split("|||")]
-              if len(parts) == len(batch):
-                  return [(k, restore(part, toks, wu)) for (k, o, p, toks, wu), part in zip(batch, parts)]
+          def wrap_dialogue(text):
+              if not isinstance(text, str) or not text.strip():
+                  return text
+              # If a portrait tag (\E0, \F1, etc.) is present, boxes are narrower (~25 chars); otherwise ~33 chars
+              has_face = bool(re.search(r"\\[EF][0-9A-Za-z]", text))
+              limit = 25 if has_face else 33
+              # Split on existing manual breaks (& or \n) and wrap any segment that overflows
+              parts = re.split(r"(&|\\n)", text)
               out = []
-              for k, orig, p, toks, wu in batch:
-                  out.append((k, restore(gt(p, sl), toks, wu)))
-              return out
+              for p in parts:
+                  if p in ("&", "\\n"):
+                      out.append(p)
+                  else:
+                      out.append(wrap_segment(p, limit))
+              return "".join(out)
 
-          for fp in ["strings.json"] + [f"chapter{i}/strings.json" for i in range(1, 6)]:
+          for fp in [f"chapter{i}/strings.json" for i in range(1, 6)]:
               if not os.path.exists(fp):
                   continue
-              sl = "auto" if fp == "strings.json" else "en"
               with open(fp, "r", encoding="utf-8") as f:
                   data = json.load(f)
-              items = [(k, v) for k, v in data.items() if isinstance(v, str) and v.strip()]
-              batches, cur, clen = [], [], 0
-              for k, v in items:
-                  p, toks, wu = protect(v)
-                  if cur and clen + len(p) + 9 > 2200:
-                      batches.append((cur, sl))
-                      cur, clen = [], 0
-                  cur.append((k, v, p, toks, wu))
-                  clen += len(p) + 9
-              if cur:
-                  batches.append((cur, sl))
-              with ThreadPoolExecutor(max_workers=8) as ex:
-                  for res in ex.map(run_batch, batches):
-                      for k, nv in res:
-                          data[k] = nv
+              fixed = 0
+              for k, v in data.items():
+                  nv = wrap_dialogue(v)
+                  if nv != v:
+                      data[k] = nv
+                      fixed += 1
               with open(fp, "w", encoding="utf-8") as f:
                   json.dump(data, f, ensure_ascii=False, indent=2)
-              print(f"Finished {fp} ({len(batches)} batches)")
+              print(f"{fp}: wrapped {fixed} overflowing lines")
           EOF
 
       - name: Pack Zip and Commit
@@ -133,7 +82,21 @@ jobs:
           rm -rf lang
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add delta-romanian.zip
-          git commit -m "Build Romanian translation pack with lang/ folder" || echo "No changes"
+          git add -A
+          git commit -m "Auto-wrap long dialogue lines for in-game text boxes" || echo "No changes"
           git push
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: "Deltarune Romanian Translation (Chapters 1–5) v1.0.0"
+          body: |
+            Full Romanian translation pack for **Deltarune (Chapters 1–5)** on Android (**DeltaQuick**).
+            
+            ### Quick Install:
+            1. Install **Deltranslate Base Obligatory** (`mod_deltranslate_5.2.8_deltaquick.zip`) in DeltaQuick first.
+            2. Download **`delta-romanian.zip`** below and install it in DeltaQuick (`Select folder` → `Select ZIP`).
+            3. Switch the in-game language toggle on the Chapter Select screen and play!
+          files: delta-romanian.zip
           
