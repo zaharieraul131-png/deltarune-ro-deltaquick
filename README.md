@@ -5,7 +5,9 @@ instructions to install:
 1. download the Deltranslate Project - Android Port (Base Obligatory) from this link https://gamejolt.com/games/android-deltranslate-project/1086889
 2. download my mod! the delta-romanian.zip file! go at releases and download it!
 3. install and open deltaquick from the playstore, after opening it, press Select folder, select folder again, and select your deltarune game folder(legally aquaired I hope) wait for it to install and press Select folder again and select zip, first select mod-deltranslate-5.2.8-deltaquick.zip and wait for it to install and then press Select folder again and select zip again and select delta-romanian.zip and wait for it to install!
-4. THAT'S IT, YOU CAN NOW PRESS PLAY AND PLAY ALL OF DELTARUNE IN ROMANIAN!## Credits & Legal Disclaimer
+4. THAT'S IT, YOU CAN NOW PRESS START AND PLAY ALL OF DELTARUNE IN ROMANIAN!
+
+## Credits & Legal Disclaimer
 
 ### Credits
 - **Deltarune** is created and owned by **Toby Fox**.
