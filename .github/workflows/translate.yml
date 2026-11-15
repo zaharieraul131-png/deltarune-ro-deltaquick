@@ -20,13 +20,12 @@ jobs:
       - name: Run Translator
         run: |
           python -u - << 'EOF'
-          import json, os, re, sys, time, requests
+          import json, os, re, time, requests
           from concurrent.futures import ThreadPoolExecutor
 
           S = requests.Session()
           S.mount("https://", requests.adapters.HTTPAdapter(pool_connections=15, pool_maxsize=15))
           URL = "https://" + ".".join(["translate", "googleapis", "com"]) + "/translate_a/single"
-                    
 
           SUBS = {
               "ă":"a","â":"a","î":"i","ș":"s","ş":"s","ț":"t","ţ":"t",
@@ -127,11 +126,14 @@ jobs:
 
       - name: Pack Zip and Commit
         run: |
-          rm -f delta-romanian.zip
-          zip -r delta-romanian.zip chapter1 chapter2 chapter3 chapter4 chapter5 settings.json strings.json
+          rm -rf delta-romanian.zip lang
+          mkdir -p lang
+          cp -r chapter1 chapter2 chapter3 chapter4 chapter5 settings.json strings.json lang/
+          zip -r delta-romanian.zip lang
+          rm -rf lang
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add -A
-          git commit -m "Build Romanian translation pack" || echo "No changes"
+          git add delta-romanian.zip
+          git commit -m "Build Romanian translation pack with lang/ folder" || echo "No changes"
           git push
           
