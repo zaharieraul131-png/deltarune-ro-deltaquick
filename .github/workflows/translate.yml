@@ -46,7 +46,6 @@ jobs:
               return lines
 
           def compact_romanian(text):
-              # Safely shorten verbose Romanian phrasing only when a box exceeds 3 lines
               replacements = [
                   (r"\bde fapt\b", ""),
                   (r"\bun pic\b", ""),
@@ -127,7 +126,6 @@ jobs:
               has_face = bool(re.search(r"\\[EF][0-9A-Za-z]", text))
               safe_w = 24 if has_face else 26
 
-              # Keep EXACT original '/' and '/%' page breaks — NEVER add new '/' pages!
               pages = re.split(r"(/%|/)", text)
               rebuilt_pages = []
               for page in pages:
@@ -142,17 +140,14 @@ jobs:
                   flat = page.replace("&", " ").replace("\\n", " ")
                   flat = re.sub(r" {2,}", " ", flat).strip()
 
-                  # Try fitting into <= 3 lines at safe width (24..27 chars)
                   lines = layout_page(flat, safe_w)
                   if len(lines) > 3:
                       lines = layout_page(flat, safe_w + 2)
-                  # If still > 3 lines, compact verbose Romanian filler words so it fits cleanly in 3 lines
                   if len(lines) > 3:
                       compacted = compact_romanian(flat)
                       lines = layout_page(compacted, safe_w + 2)
-                  # Last-resort merge of line 4 onto line 3 if only 1 short word spilled over
-                  if len(lines) == 4 and visible_len(lines) + visible_len(lines) + 1 <= 29:
-                      lines = lines + " " + lines
+                  if len(lines) == 4 and visible_len(lines[-2]) + visible_len(lines[-1]) + 1 <= 29:
+                      lines[-2] = lines[-2] + " " + lines[-1]
                       lines = lines[:3]
 
                   rebuilt_pages.append("&".join(lines) + trailing)
@@ -195,17 +190,18 @@ jobs:
           cp -r chapter1 chapter2 chapter3 chapter4 chapter5 settings.json strings.json lang/
           zip -r delta-romanian.zip lang
           rm -rf lang
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
+          git config user.name "zaharieraul131-png"
+          git config user.email "zaharieraul131-png@://github.com"
           git add -A
           git commit -m "Strict 3-line fit with smart Romanian compaction & zero extra pages (v1.2.8)" || echo "No changes"
           git push
 
-      - name: Publish GitHub Release
+      - name: Replace v1.2.8 GitHub Release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.MY_TOKEN }}
         run: |
           gh release delete v1.2.8 --cleanup-tag -y || true
+          git push origin :refs/tags/v1.2.8 || true
           gh release create v1.2.8 delta-romanian.zip \
             --title "Deltarune Romanian Translation (Chapters 1–5) v1.2.8" \
             --notes "Full Romanian translation pack for Deltarune (Chapters 1–5) on Android (DeltaQuick). Enforces strict 3-line dialogue box height with smart Romanian compaction and zero extra page breaks so cutscenes never freeze and no text overlaps the bottom border."
