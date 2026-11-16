@@ -107,7 +107,8 @@ jobs:
                   return [(k, restore(part, toks, wu)) for (k, o, p, toks, wu), part in zip(batch, parts)]
               return [(k, restore(gt(p, sl), toks, wu)) for k, o, p, toks, wu in batch]
               
-            COMPACT_RULES = [
+            
+          COMPACT_RULES = [
               (r"\bde fapt\b", ""), (r"\bun pic\b", ""), (r"\bchiar acum\b", "acum"),
               (r"\bfoarte mult\b", "mult"), (r"\bfoarte\b", ""), (r"\bchiar\b", ""),
               (r"\bpe care\b", "ce"), (r"\bpentru ca\b", "ca"), (r"\bin acest\b", "in"),
