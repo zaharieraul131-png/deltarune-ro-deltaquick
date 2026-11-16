@@ -1,10 +1,10 @@
 {
-    "name": "Español",
-    "lang_code": "es_mx",
-    "description": "Español - América",
-    "link": "",
+    "name": "Romana",
+    "lang_code": "ro_ro",
+    "description": "Romana - Toate Capitolele (1-5)",
+    "link": "https://github.com",
     "monospace_fonts": true,
-    "enable_translated_songs_switch": true,
-    "line_height_factor": 1,
-    "files_url": "https://raw.githubusercontent.com/BroxiCoros/LetraDelta/refs/heads/main/lang/"
+    "enable_translated_songs_switch": false,
+    "line_height_factor": 0.9,
+    "files_url": ""
 }
