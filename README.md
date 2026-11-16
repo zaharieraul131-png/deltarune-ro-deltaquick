@@ -1,7 +1,4 @@
 # deltarune-ro-deltaquick
-[![Total Downloads](https://shields.io)](https://github.com)
-[![Latest Release](https://shields.io)](https://github.com/latest)
-
 HELLO, what I've got here is an mod as Deltranslate Project - Android Port(my mod is like an port of that one)
 It's all of deltarune, all 5 chapters, IN ROMANIAN! couse IM Romanian myself!
 instructions to install:
