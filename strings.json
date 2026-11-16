@@ -44,7 +44,7 @@
   "obj_gamecontroller_Draw_73_3_0": "Para cerrar presione: [P]",
   "obj_gamecontroller_Draw_73_4_0": "Se actualizó con éxito a la versión {0}.\nQue disfrute del juego.",
   "obj_gamecontroller_Draw_73_4_1": "Algo salió mal.\nError HTTP - {0}.",
-  "obj_gamecontroller_Draw_73_5_0": "Cargando",
+  "obj_gamecontroller_Draw_73_5_0": "Cargando", 
   "obj_gamecontroller_Draw_73_6_0": "{0} cargado",
   "obj_gamecontroller_Draw_73_7_0": "{0}/{1} archivos de traducción cargados",
   "obj_gamecontroller_Draw_73_8_0": "Cargando {0}: {1}%",

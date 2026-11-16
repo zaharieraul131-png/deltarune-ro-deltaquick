@@ -1,4 +1,4 @@
-import json, re, os, socket, requests
+import json, os, socket, requests
 from concurrent.futures import ThreadPoolExecutor
 
 og = socket.getaddrinfo
@@ -6,53 +6,77 @@ socket.getaddrinfo = lambda *a, **k: [r for r in og(*a, **k) if r.copy().pop(0) 
 
 S = requests.Session()
 URL = "https://translate." + "://googleapis.com"
-subs = {"ă":"a","â":"a","î":"i","ș":"s","ş":"s","ț":"t","ţ":"t","Ă":"A","Â":"A","Î":"I","Ș":"S","Ş":"S","Ț":"T","Ţ":"T"}
+SUBS = {"ă":"a","â":"a","î":"i","ș":"s","ş":"s","ț":"t","ţ":"t","Ă":"A","Â":"A","Î":"I","Ș":"S","Ş":"S","Ț":"T","Ţ":"T"}
 
 def clean_ro(t):
-    for k, v in subs.items():
+    for k, v in SUBS.items():
         t = t.replace(k, v)
     return t
 
-TAGS = re.compile(r"(\\[A-Za-z][0-9A-Za-z]?|\\n|\^[0-9]|~[0-9]|&|/|\*|%|\{[^}]+\}|\[[^\]]+\])")
-
 def protect(v):
     toks = []
-    def repl(m):
-        toks.append(m.group(0))
-        return f" XTOK{len(toks)-1}X "
-    c = TAGS.sub(repl, v)
-    letters = [ch for ch in c if ch.isalpha()]
-    wu = len(letters) > 2 and all(ch.isupper() for ch in letters)
+    out = []
+    i = 0
+    n = len(v)
+    while i < n:
+        ch = v[i:i+1]
+        if ch == "\\":
+            end = min(n, i + 3) if v[i+1:i+2] in ("M","E","F","C","S","W","T","f","c") else min(n, i + 2)
+            toks.append(v[i:end])
+            out.append(f" XTOK{len(toks)-1}X ")
+            i = end
+        elif ch in ("^", "~") and i + 1 < n and v[i+1:i+2].isdigit():
+            toks.append(v[i:i+2])
+            out.append(f" XTOK{len(toks)-1}X ")
+            i += 2
+        elif ch in ("&", "/", "*", "%"):
+            toks.append(ch)
+            out.append(f" XTOK{len(toks)-1}X ")
+            i += 1
+        else:
+            out.append(ch)
+            i += 1
+    c = "".join(out)
+    letters = [x for x in c if x.isalpha()]
+    wu = len(letters) > 2 and all(x.isupper() for x in letters)
     if wu:
-        c = re.sub(r"\b(?!XTOK\d+X)[A-Z]+\b", lambda m: m.group(0).lower(), c)
+        words = c.split(" ")
+        c = " ".join(w if w.startswith("XTOK") else w.lower() for w in words)
     return c, toks, wu
 
 def restore(t, toks, wu):
     if wu:
-        t = re.sub(r"\b(?!XTOK\d+X)[a-zA-ZăâîșşțţĂÂÎȘŞȚŢ]+\b", lambda m: m.group(0).upper(), t)
+        words = t.split(" ")
+        t = " ".join(w if "xtok" in w.lower() else w.upper() for w in words)
     for i, tk in enumerate(toks):
-        t = re.sub(rf"\s*XTOK{i}X\s*", lambda _: tk, t, flags=re.IGNORECASE)
+        for pat in (f" XTOK{i}X ", f"XTOK{i}X ", f" XTOK{i}X", f"XTOK{i}X", f" xtok{i}x ", f"xtok{i}x ", f" xtok{i}x", f"xtok{i}x"):
+            if pat in t:
+                t = t.replace(pat, tk)
     return clean_ro(t)
 
 def gt(txt, sl="en"):
     r = S.get(URL, params={"client":"gtx","sl":sl,"tl":"ro","dt":"t","q":txt}, timeout=8)
     r.raise_for_status()
-    return "".join(s.copy().pop(0) for s in r.json().copy().pop(0) if s and s.copy().pop(0))
+    res = r.json()
+    first = res.copy().pop(0)
+    return "".join(seg.copy().pop(0) for seg in first if seg and seg.copy().pop(0))
 
 def run_batch(args):
     batch, sl = args
-    joined = "\n\n|||\n\n".join(x.copy().pop(2) for x in batch)
+    joined = "\n\n|||\n\n".join(list(x).pop(2) for x in batch)
     try:
-        parts = re.split(r"\s*\|\|\|\s*", gt(joined, sl))
+        raw = gt(joined, sl)
+        parts = [p.strip() for p in raw.split("|||")]
         if len(parts) == len(batch):
-            return [(batch.copy().pop(i).copy().pop(0), restore(parts.copy().pop(i), batch.copy().pop(i).copy().pop(3), batch.copy().pop(i).copy().pop(4))) for i in range(len(batch))]
-    except Exception:
-        pass
+            return [(batch[i][0], restore(parts[i], batch[i][3], batch[i][4])) for i in range(len(batch))]
+    except Exception as e:
+        print("Batch err:", e)
     out = []
     for k, orig, p, toks, wu in batch:
         try:
             out.append((k, restore(gt(p, sl), toks, wu)))
-        except Exception:
+        except Exception as e:
+            print("Line err:", e)
             out.append((k, orig))
     return out
 
@@ -68,7 +92,7 @@ for fp in ["strings.json"] + [f"chapter{i}/strings.json" for i in range(1, 6)]:
         if cur and clen + len(p) + 9 > 1500:
             batches.append((cur, sl))
             cur, clen = [], 0
-        cur.append([k, v, p, toks, wu])
+        cur.append((k, v, p, toks, wu))
         clen += len(p) + 9
     if cur:
         batches.append((cur, sl))
