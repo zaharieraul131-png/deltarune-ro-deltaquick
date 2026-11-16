@@ -299,11 +299,14 @@ jobs:
                       if final_v.count("/") != orig_v.count("/") or final_v.count("%") != orig_v.count("%"):
                           final_v = orig_v
                       final_data[k] = final_v
-                      # Audit check
-                      if "DEVICE_CONTACT" not in k and (orig_v.strip().startswith("*") or orig_v.strip().endswith(("/", "/%", "%"))):
+                      # Audit check (allow credits/shop panels and keys that already had >3 lines in original English)
+                      if not any(tag in k for tag in ("DEVICE_CONTACT", "credits", "shop")) and (orig_v.strip().startswith("*") or orig_v.strip().endswith(("/", "/%", "%"))):
+                          orig_max_l = max((len(pg.split("&")) for pg in re.split(r"/%|/", orig_v) if pg not in ("/%", "/")), default=3)
+                          allowed_l = max(3, orig_max_l)
                           for pg in re.split(r"/%|/", final_v):
-                              if pg not in ("/%", "/") and len(pg.split("&")) > 3:
-                                  audit_errors.append(f"{fp} [{k}]: >3 lines")
+                              if pg not in ("/%", "/") and len(pg.split("&")) > allowed_l:
+                                  audit_errors.append(f"{fp} [{k}]: >{allowed_l} lines")
+                                  
                   else:
                       final_data[k] = orig_v
               with open(fp, "w", encoding="utf-8") as f:
