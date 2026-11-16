@@ -1,0 +1,235 @@
+name: Scan, Wrap & Publish Release
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Fix Leading Blank Lines, Multi-Bullet Height & Glued Words (v1.3.1)
+        run: |
+          python -u - << 'EOF'
+          import json, os, re, sys
+
+          TAG_RE = re.compile(r"(\\[A-Za-z][0-9A-Za-z]?|\\n|\^[0-9]|~[0-9]|&|/|\*|%|\{[^}]+\}|\[[^\]]+\])")
+
+          def visible_len(s):
+              return len(TAG_RE.sub("", s))
+
+          SAFE_WORDS = {
+              "sau","sunt","sub","spre","stie","stiu","spune","spus","spate","scoala","scuza","scuze",
+              "saptamana","sange","sarit","sarac","salut","salva","salvare","samanta","sanse","sansa",
+              "scara","scena","schimba","schimb","scris","scrie","scurt","scurta","seara","secret",
+              "secunda","semn","senin","sens","serios","setat","sfarsit","sfat","sigur","siguranta",
+              "simplu","simte","simt","singur","singura","situatie","slab","slaba","soare","soarta",
+              "soc","social","soldat","solutie","somn","sora","sort","sos","spaima","spala","sparge",
+              "special","spectacol","sper","spera","speranta","spirit","spital","sprijin","stabilesc",
+              "stanga","stare","stat","stea","stele","sterg","stins","stop","strada","strain","straluce",
+              "strange","strica","striga","structura","student","subiect","succes","sufera","suflet",
+              "suna","sunet","supa","super","suprafata","surpriza","sus","sustine","inainte","inapoi",
+              "incepe","inceput","incerca","incet","inchide","inchis","include","inca","incapere",
+              "incarca","incat","incercare","incredere","indata","indeajuns","indica","individ","inel",
+              "inima","intalni","intampla","intarzia","inteleg","intelege","intentie","interes","interior",
+              "intern","intra","intrare","intre","intreaba","intrebare","intreg","intuneric","invata",
+              "invatat","invinge","invita","invitat","iarna","iarba","iata","deasupra","decat","decide",
+              "decizie","deja","deloc","departe","depinde","deschide","deschis","descrie","descopera",
+              "desen","despre","destul","detaliu","deveni","devreme","pentru","pereche","perete","perfect",
+              "pericol","perioada","permite","persoana","personal","peste","petrece","piatra","picior",
+              "picioare","pierde","pierdut","piesa","pisica","pizza","place","placut","plan","plata",
+              "pleca","plecat","plin","plimba","ploaie","plange","poarta","poate","pod","pofta","poftim",
+              "polita","politie","popor","porc","porni","portocaliu","posibil","post","potrivit","poveste",
+              "praf","practic","prea","pregatit","pregateste","premia","present","prezent","pret","prieten",
+              "prietena","prim","prima","primavara","primeasca","primi","primit","prin","prinde","prins",
+              "print","printesa","priveste","privi","priza","problema","proces","produs","profesor",
+              "program","proiect","promit","promite","propriu","prost","proteja","proba","public","pui",
+              "punct","pune","purta","putea","putere","puternic","putin","cutie","curaj","curajos",
+              "curand","curat","cuvant","cuvinte","cumpara","cunoaste","cunoscut","curge","curs","curte",
+              "cutit","oameni","oare","oase","obicei","obiect","obosit","obraz","observa","obtine","ocazie",
+              "ochelari","ochi","ocupat","odihna","oferta","ofera","oglinda","omida","onest","opreste",
+              "opri","oprit","oras","orasel","ordine","orice","oricum","oricine","origini","oriunde",
+              "unde","undeva","uneori","unghi","unul","una","urma","urmeaza","urmator","usa","usor","ambele"
+          }
+
+          def clean_glued_and_quotes(text):
+              text = text.replace("„", '"').replace("”", '"').replace("“", '"').replace("’", "'")
+              # Split camelCase (doamnaAlphys -> doamna Alphys)
+              text = re.sub(r"([a-zăâîșț])([A-ZĂÂÎȘȚ])", r"\1 \2", text)
+              # Split glued short prepositions/auxiliaries (amputea -> am putea, lapriza -> la priza)
+              text = re.sub(
+                  r"\b(am|ai|au|as|ar|la|in|pe|cu|de|sa|se|si|un|o|nu|ne|va|le|li|mi|ti)([a-z]{4,})\b",
+                  lambda m: m.group(0) if m.group(0).lower() in SAFE_WORDS else f"{m.group(1)} {m.group(2)}",
+                  text,
+                  flags=re.IGNORECASE
+              )
+              return text
+          def compact_romanian(text):
+              replacements = [
+                  (r"\bde fapt\b", ""), (r"\bun pic\b", ""), (r"\bchiar acum\b", "acum"),
+                  (r"\bfoarte mult\b", "mult"), (r"\bfoarte\b", ""), (r"\bchiar\b", ""),
+                  (r"\bpe care\b", "ce"), (r"\bpentru ca\b", "ca"), (r"\bin acest\b", "in"),
+                  (r"\bacest\b", ""), (r"\baceasta\b", ""), (r"\baceia\b", ""),
+                  (r"\bdespre asta\b", "de asta"), (r"\basa ca\b", "deci"), (r"\bsi apoi\b", "apoi"),
+              ]
+              out = text
+              for pat, rep in replacements:
+                  out = re.sub(pat, rep, out, flags=re.IGNORECASE)
+              out = re.sub(r" {2,}", " ", out)
+              return re.sub(r"\s+([?!.,:;])", r"\1", out).strip()
+
+          def wrap_words(text, max_len):
+              text = re.sub(r" {2,}", " ", text).strip()
+              if not text:
+                  return []
+              words = text.split(" ")
+              lines, cur = [], ""
+              for w in words:
+                  if w in ("?", "!", ".", ",", ":", ";") and cur:
+                      cur += w
+                      continue
+                  cand = f"{cur} {w}".strip() if cur else w
+                  if cur and visible_len(cand) > max_len:
+                      lines.append(cur)
+                      cur = w
+                  else:
+                      cur = cand
+              if cur:
+                  lines.append(cur)
+              return lines
+
+          def layout_page(flat, max_len):
+              # If there are 3+ short '*' bullets in one box, merge the first two so vertical height stays <= 2 bullets!
+              bullets = re.split(r"\s*(?<!^)(?=\*[A-Za-z0-9\"'(\[])", flat)
+              if len(bullets) >= 3:
+                  merged_first = bullets[0].rstrip() + " " + bullets[1].lstrip().lstrip("*")
+                  bullets = [merged_first] + bullets[2:]
+              lines = []
+              for sb in bullets:
+                  lines.extend(wrap_words(sb, max_len))
+              return lines
+
+          def force_max_lines(lines, max_w, target_max):
+              if len(lines) <= target_max:
+                  return lines
+              joined = " ".join(lines)
+              for w in (25, 27, 28):
+                  if w > max_w:
+                      cand = layout_page(joined, w)
+                      if len(cand) <= target_max:
+                          return cand
+              comp = compact_romanian(joined)
+              cand = layout_page(comp, 28)
+              if len(cand) <= target_max:
+                  return cand
+              while len(cand) > target_max:
+                  cand[-2] = cand[-2] + " " + cand[-1]
+                  cand.pop()
+              return cand
+          def fix_choice_line(text):
+              if "#" in text and not text.strip().startswith("*"):
+                  parts = [p.strip() for p in text.split("#")]
+                  padded = [("   " + p[:14].strip()) if p else p for p in parts]
+                  return "#".join(padded)
+              return re.sub(r"(\\C[1-4])\s*([^\n\\&/#]+)", lambda m: f"{m.group(1)}   {m.group(2).strip()}", text)
+
+          def is_typewriter_dialogue(key, text):
+              if re.search(r"\\C[0-9]", text) or ("#" in text and not text.strip().startswith("*")):
+                  return False
+              if "DEVICE_CONTACT" in key:
+                  return True
+              stripped = text.strip()
+              return stripped.startswith("*") or bool(re.match(r"^\\[A-Za-z][0-9A-Za-z]?\s*\*", stripped)) or stripped.endswith(("/", "/%", "%"))
+
+          def reflow_dialogue(key, text):
+              if not isinstance(text, str) or not text.strip():
+                  return text
+              text = clean_glued_and_quotes(text)
+              if re.search(r"\\C[0-9]", text) or ("#" in text and not text.strip().startswith("*")):
+                  return fix_choice_line(text)
+              if not is_typewriter_dialogue(key, text):
+                  return re.sub(r"\s*&\s*", " ", text).strip()
+              if "DEVICE_CONTACT" in key:
+                  text = re.sub(r"&([?!.,:;])", r"\1", text)
+                  return "".join(p if p in ("&", "\\n") else ("&".join(wrap_words(p, 18)) if p.strip() else p) for p in re.split(r"(&|\\n)", text))
+
+              has_face = bool(re.search(r"\\[EF][0-9A-Za-z]", text))
+              safe_w = 24 if has_face else 26
+              pages = re.split(r"(/%|/)", text)
+              rebuilt_pages = []
+              for page in pages:
+                  if page in ("/%", "/") or not page.strip():
+                      rebuilt_pages.append(page)
+                      continue
+                  trailing = ""
+                  m_trail = re.search(r"(\s*%+\s*)$", page)
+                  if m_trail:
+                      trailing = m_trail.group(1)
+                      page = page[:m_trail.start()]
+                  # Strip leading & or \n right after speaker/face tags so text starts at TOP of box!
+                  page = re.sub(r"^((?:\\[A-Za-z][0-9A-Za-z]?)+)(?:\s*(?:&|\\n)\s*)+", r"\1", page.lstrip())
+                  page = re.sub(r"^(?:\s*(?:&|\\n)\s*)+", "", page)
+                  flat = re.sub(r" {2,}", " ", page.replace("&", " ").replace("\\n", " ")).strip()
+                  raw_lines = layout_page(flat, safe_w)
+                  # Multi-bullet boxes have extra vertical spacing, so cap them at 2 lines; normal boxes at 3 lines
+                  bullet_cnt = sum(1 for ln in raw_lines if ln.lstrip().startswith("*"))
+                  target_max = 2 if bullet_cnt >= 2 else 3
+                  lines = force_max_lines(raw_lines, safe_w, target_max)
+                  rebuilt_pages.append("&".join(lines) + trailing)
+              return "".join(rebuilt_pages)
+
+          if os.path.exists("strings.json"):
+              with open("strings.json", "r", encoding="utf-8") as f:
+                  menu_data = json.load(f)
+              for k, v in menu_data.items():
+                  if isinstance(v, str):
+                      menu_data[k] = re.sub(r"\s*&\s*", " ", clean_glued_and_quotes(v)).strip()
+              with open("strings.json", "w", encoding="utf-8") as f:
+                  json.dump(menu_data, f, ensure_ascii=False, indent=2)
+
+          for fp in [f"chapter{i}/strings.json" for i in range(1, 6)]:
+              if not os.path.exists(fp):
+                  continue
+              with open(fp, "r", encoding="utf-8") as f:
+                  data = json.load(f)
+              fixed = 0
+              for k, v in data.items():
+                  nv = reflow_dialogue(k, v)
+                  if nv != v:
+                      data[k] = nv
+                      fixed += 1
+              with open(fp, "w", encoding="utf-8") as f:
+                  json.dump(data, f, ensure_ascii=False, indent=2)
+              print(f"{fp}: updated {fixed} entries")
+          EOF
+
+      - name: Pack Zip and Commit
+        run: |
+          rm -rf delta-romanian.zip lang
+          mkdir -p lang
+          cp -r chapter1 chapter2 chapter3 chapter4 chapter5 settings.json strings.json lang/
+          zip -r delta-romanian.zip lang
+          rm -rf lang
+          git config user.name "zaharieraul131-png"
+          git config user.email "zaharieraul131-png@://github.com"
+          git add -A
+          git commit -m "Fix leading blank lines, multi-bullet box height & glued words (v1.3.1)" || echo "No changes"
+          git push
+
+      - name: Publish v1.3.1 GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.MY_TOKEN }}
+        run: |
+          gh release delete v1.3.1 --cleanup-tag -y || true
+          git push origin :refs/tags/v1.3.1 || true
+          gh release create v1.3.1 delta-romanian.zip \
+            --title "Deltarune Romanian Translation (Chapters 1–5) v1.3.1" \
+            --notes "Full Romanian translation pack for Deltarune (Chapters 1–5) on Android (DeltaQuick). Strips leading blank lines above dialogue, caps multi-bullet boxes at 2 lines so Alphys/Noelle lines never hit the bottom border, and fixes glued Romanian words (doamnaAlphys, amputea)."
+            
