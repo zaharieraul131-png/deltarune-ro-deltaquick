@@ -303,7 +303,7 @@ jobs:
       - name: Publish v2.2.0 GitHub Release
         env:
           GH_TOKEN: ${{ secrets.MY_TOKEN }}
-        run: |. 
+        run: | 
         gh release delete v2.2.0 --cleanup-tag -y || true
 git push origin :refs/tags/v2.2.0 || true
 gh release create v2.2.0 delta-romanian.zip 
