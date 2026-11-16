@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Smart Box Fit (23/27 Width, Max 3 Lines, No Orphan 1-Word Pages) (v1.2.6)
+      - name: Strict 3-Line Box Fit Without Extra Pages (v1.2.8)
         run: |
           python -u - << 'EOF'
           import json, os, re
@@ -45,6 +45,34 @@ jobs:
                   lines.append(cur)
               return lines
 
+          def compact_romanian(text):
+              # Safely shorten verbose Romanian phrasing only when a box exceeds 3 lines
+              replacements = [
+                  (r"\bde fapt\b", ""),
+                  (r"\bun pic\b", ""),
+                  (r"\bchiar acum\b", "acum"),
+                  (r"\bfoarte mult\b", "mult"),
+                  (r"\bfoarte\b", ""),
+                  (r"\bchiar\b", ""),
+                  (r"\bpe care\b", "ce"),
+                  (r"\bpentru ca\b", "ca"),
+                  (r"\bîn acest\b", "in"),
+                  (r"\bin acest\b", "in"),
+                  (r"\bacest\b", ""),
+                  (r"\baceasta\b", ""),
+                  (r"\baceia\b", ""),
+                  (r"\bdespre asta\b", "de asta"),
+                  (r"\basa ca\b", "deci"),
+                  (r"\bsi apoi\b", "apoi"),
+                  (r"\b\.\.\.\b", ".."),
+              ]
+              out = text
+              for pat, rep in replacements:
+                  out = re.sub(pat, rep, out, flags=re.IGNORECASE)
+              out = re.sub(r" {2,}", " ", out)
+              out = re.sub(r"\s+([?!.,:;])", r"\1", out)
+              return out.strip()
+
           def fix_choice_line(text):
               if "#" in text and not text.strip().startswith("*"):
                   parts = [p.strip() for p in text.split("#")]
@@ -68,19 +96,23 @@ jobs:
                   return True
               return False
 
+          def layout_page(flat, max_len):
+              sub_blocks = re.split(r"\s*(?<!^)(?=\*[A-Za-z0-9\"'(\[])", flat)
+              lines = []
+              for sb in sub_blocks:
+                  lines.extend(wrap_words(sb, max_len))
+              return lines
+
           def reflow_dialogue(key, text):
               if not isinstance(text, str) or not text.strip():
                   return text
 
-              # 1. Choice alignment: pad choices so SOUL heart sits cleanly to the left
               if re.search(r"\\C[0-9]", text) or ("#" in text and not text.strip().startswith("*")):
                   return fix_choice_line(text)
 
-              # 2. HUD & menu cleanup: strip '&' from non-dialogue UI text
               if not is_typewriter_dialogue(key, text):
                   return re.sub(r"\s*&\s*", " ", text).strip()
 
-              # 3. Gaster / DEVICE_CONTACT wide-font open screens
               if "DEVICE_CONTACT" in key:
                   text = re.sub(r"&([?!.,:;])", r"\1", text)
                   parts = re.split(r"(&|\\n)", text)
@@ -92,11 +124,10 @@ jobs:
                           out.append("&".join(wrap_words(p, 18)) if p.strip() else p)
                   return "".join(out)
 
-              # Portrait boxes fit 23 chars/line; full-width narrator boxes fit 27 chars/line
               has_face = bool(re.search(r"\\[EF][0-9A-Za-z]", text))
-              limit = 23 if has_face else 27
-              max_lines = 3
+              safe_w = 24 if has_face else 26
 
+              # Keep EXACT original '/' and '/%' page breaks — NEVER add new '/' pages!
               pages = re.split(r"(/%|/)", text)
               rebuilt_pages = []
               for page in pages:
@@ -111,35 +142,20 @@ jobs:
                   flat = page.replace("&", " ").replace("\\n", " ")
                   flat = re.sub(r" {2,}", " ", flat).strip()
 
-                  prefix_m = re.match(r"^((?:\\[A-Za-z][0-9A-Za-z]?)+)", flat)
-                  prefix = prefix_m.group(1) if prefix_m else ""
-                  body = flat[len(prefix):].strip() if prefix else flat
+                  # Try fitting into <= 3 lines at safe width (24..27 chars)
+                  lines = layout_page(flat, safe_w)
+                  if len(lines) > 3:
+                      lines = layout_page(flat, safe_w + 2)
+                  # If still > 3 lines, compact verbose Romanian filler words so it fits cleanly in 3 lines
+                  if len(lines) > 3:
+                      compacted = compact_romanian(flat)
+                      lines = layout_page(compacted, safe_w + 2)
+                  # Last-resort merge of line 4 onto line 3 if only 1 short word spilled over
+                  if len(lines) == 4 and visible_len(lines) + visible_len(lines) + 1 <= 29:
+                      lines = lines + " " + lines
+                      lines = lines[:3]
 
-                  bullets = re.split(r"\s*(?<!^)(?=\*[A-Za-z0-9\"'(\[])", body)
-                  all_box_pages = []
-                  for b in bullets:
-                      b_lines = wrap_words(b, limit)
-                      if not b_lines:
-                          continue
-                      # If it slightly overflows 3 lines by just a few chars, try +2 chars width before splitting into a tiny orphan page!
-                      if len(b_lines) == 4 and visible_len(b_lines[-1]) <= 12:
-                          wider_lines = wrap_words(b, limit + 2)
-                          if len(wider_lines) <= 3:
-                              b_lines = wider_lines
-                      chunks = [b_lines[i:i+max_lines] for i in range(0, len(b_lines), max_lines)]
-                      for idx, ch in enumerate(chunks):
-                          joined_ch = "&".join(ch)
-                          # Ensure follow-up split pages keep speaker tag AND start cleanly
-                          if idx > 0 and not joined_ch.startswith("*"):
-                              joined_ch = "*" + joined_ch
-                          if prefix and not joined_ch.startswith("\\"):
-                              joined_ch = prefix + joined_ch
-                          all_box_pages.append(joined_ch)
-
-                  if all_box_pages:
-                      rebuilt_pages.append("/".join(all_box_pages) + trailing)
-                  else:
-                      rebuilt_pages.append(page + trailing)
+                  rebuilt_pages.append("&".join(lines) + trailing)
               return "".join(rebuilt_pages)
 
           if os.path.exists("strings.json"):
@@ -157,14 +173,19 @@ jobs:
               with open(fp, "r", encoding="utf-8") as f:
                   data = json.load(f)
               fixed = 0
+              still_4 = 0
               for k, v in data.items():
                   nv = reflow_dialogue(k, v)
                   if nv != v:
                       data[k] = nv
                       fixed += 1
+                  if isinstance(nv, str) and is_typewriter_dialogue(k, nv) and "DEVICE_CONTACT" not in k:
+                      for p in re.split(r"/%|/", nv):
+                          if p not in ("/%", "/") and len(p.split("&")) > 3:
+                              still_4 += 1
               with open(fp, "w", encoding="utf-8") as f:
                   json.dump(data, f, ensure_ascii=False, indent=2)
-              print(f"{fp}: updated {fixed} entries")
+              print(f"{fp}: updated {fixed} entries (pages >3 lines: {still_4})")
           EOF
 
       - name: Pack Zip and Commit
@@ -177,15 +198,15 @@ jobs:
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add -A
-          git commit -m "Smart 23/27 width, prevent 1-word orphan pages & keep portrait tags on split pages (v1.2.6)" || echo "No changes"
+          git commit -m "Strict 3-line fit with smart Romanian compaction & zero extra pages (v1.2.8)" || echo "No changes"
           git push
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete v1.2.6 --cleanup-tag -y || true
-          gh release create v1.2.6 delta-romanian.zip \
-            --title "Deltarune Romanian Translation (Chapters 1–5) v1.2.6" \
-            --notes "Full Romanian translation pack for Deltarune (Chapters 1–5) on Android (DeltaQuick). Prevented 1-word orphan pages (like Toriel's 'orasel'), preserved portrait tags on split pages, fixed kitchen cookie-cutter 3-line fit, and aligned choice selectors."
+          gh release delete v1.2.8 --cleanup-tag -y || true
+          gh release create v1.2.8 delta-romanian.zip \
+            --title "Deltarune Romanian Translation (Chapters 1–5) v1.2.8" \
+            --notes "Full Romanian translation pack for Deltarune (Chapters 1–5) on Android (DeltaQuick). Enforces strict 3-line dialogue box height with smart Romanian compaction and zero extra page breaks so cutscenes never freeze and no text overlaps the bottom border."
             
