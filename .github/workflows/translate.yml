@@ -304,8 +304,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.MY_TOKEN }}
         run: | 
-        gh release delete v2.2.0 --cleanup-tag -y || true
-git push origin :refs/tags/v2.2.0 || true
-gh release create v2.2.0 delta-romanian.zip 
---title "Deltarune Romanian Translation (Chapters 1–5) v2.2.0" 
---notes "Full Romanian translation pack for Deltarune (Chapters 1–5) on Android (DeltaQuick). Fixed yellow/white color tag spacing (\cY/\cW), fixed 'Asculta / Nu' choice prompt, widened Legend cutscene banners, and accounted for bullet indentation so 3-line boxes never spill onto the bottom border."
+         gh release delete v2.2.0 --cleanup-tag -y || true
+         git push origin :refs/tags/v2.2.0 || true
+         gh release create v2.2.0 delta-romanian.zip 
+         --title "Deltarune Romanian Translation (Chapters 1–5) v2.2.0" 
+         --notes "Full Romanian translation pack for Deltarune (Chapters 1–5) on Android (DeltaQuick). Fixed yellow/white color tag spacing (\cY/\cW), fixed 'Asculta / Nu' choice prompt, widened Legend cutscene banners, and accounted for bullet indentation so 3-line boxes never spill onto the bottom border."
