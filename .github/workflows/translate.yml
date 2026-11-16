@@ -335,13 +335,13 @@ jobs:
           git commit -m "Alien-grade pixel-width solver & cutscene parity engine (v2.0.0)" || echo "No changes"
           git push
 
-      - name: Publish v2.0.0 GitHub Release
+      - name: Publish v2.0.1 GitHub Release
         env:
           GH_TOKEN: ${{ secrets.MY_TOKEN }}
         run: |
-          gh release delete v2.0.0 --cleanup-tag -y || true
-          git push origin :refs/tags/v2.0.0 || true
-          gh release create v2.0.0 delta-romanian.zip \
-            --title "Deltarune Romanian Translation (Chapters 1–5) v2.0.0" \
-            --notes "Ground-up Romanian translation pack for Deltarune (Chapters 1–5) on Android (DeltaQuick). Built with a pixel-accurate Deltarune font solver, 500-pass dialogue box optimizer, 100% cutscene terminator parity, SOUL heart choice alignment, and full 5-chapter automated verification."
+          gh release delete v2.0.1 --cleanup-tag -y || true
+          git push origin :refs/tags/v2.0.1 || true
+          gh release create v2.0.1 delta-romanian.zip \
+            --title "Deltarune Romanian Translation (Chapters 1–5) v2.0.1" \
+            --notes "Updated settings.json to display 'Romana' in the Chapter Select menu, tightened vertical line spacing (line_height_factor: 0.9), and disabled missing Spanish audio switches."
             
