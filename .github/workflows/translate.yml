@@ -188,7 +188,7 @@ jobs:
               if cur:
                   lines.append(cur)
               return lines
-                    def layout_bullets(flat, max_px):
+          def layout_bullets(flat, max_px):
               bullets = re.split(r"\s*(?<!^)(?=\*[A-Za-z0-9\"'(\[])", flat)
               if len(bullets) >= 3:
                   b1 = bullets.pop(0).rstrip()
