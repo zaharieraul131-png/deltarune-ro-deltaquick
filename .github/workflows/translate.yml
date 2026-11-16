@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Wrap Only Typewriter Dialogue & Clean All HUD/Menu & (v1.2.2)
+      - name: Complete Reflow, Single-Bullet Box Pagination & Choice Alignment (v1.2.5)
         run: |
           python -u - << 'EOF'
           import json, os, re
@@ -45,12 +45,22 @@ jobs:
                   lines.append(cur)
               return lines
 
+          def fix_choice_line(text):
+              if "#" in text and not text.strip().startswith("*"):
+                  parts = [p.strip() for p in text.split("#")]
+                  padded = [("   " + p[:14].strip()) if p else p for p in parts]
+                  return "#".join(padded)
+              def pad_c(m):
+                  tag = m.group(1)
+                  label = m.group(2).strip()
+                  return f"{tag}   {label}"
+              return re.sub(r"(\\C[1-4])\s*([^\n\\&/#]+)", pad_c, text)
+
           def is_typewriter_dialogue(key, text):
-              if re.search(r"\\C[0-9]", text):
+              if re.search(r"\\C[0-9]", text) or ("#" in text and not text.strip().startswith("*")):
                   return False
               if "DEVICE_CONTACT" in key:
                   return True
-              # Real Deltarune dialogue boxes start with * or a portrait/speaker tag (\E0, \F1, \M0, etc.) or end with / or /%
               stripped = text.strip()
               if stripped.startswith("*") or re.match(r"^\\[A-Za-z][0-9A-Za-z]?\s*\*", stripped):
                   return True
@@ -62,10 +72,15 @@ jobs:
               if not isinstance(text, str) or not text.strip():
                   return text
 
-              # Non-dialogue strings (HUD, menus, item names, save prompts) render '&' literally — replace with space
+              # 1. Choice alignment (v1.2.4): pad choices so SOUL heart sits cleanly to the left
+              if re.search(r"\\C[0-9]", text) or ("#" in text and not text.strip().startswith("*")):
+                  return fix_choice_line(text)
+
+              # 2. HUD & menu cleanup: remove literal '&' from non-dialogue UI strings
               if not is_typewriter_dialogue(key, text):
                   return re.sub(r"\s*&\s*", " ", text).strip()
 
+              # 3. Gaster / DEVICE_CONTACT wide-font open screens (18-char limit)
               if "DEVICE_CONTACT" in key:
                   text = re.sub(r"&([?!.,:;])", r"\1", text)
                   parts = re.split(r"(&|\\n)", text)
@@ -77,12 +92,13 @@ jobs:
                           out.append("&".join(wrap_words(p, 18)) if p.strip() else p)
                   return "".join(out)
 
-              limit = 21
+              # 4. Standard & portrait dialogue boxes (v1.2.3): strip blank top lines, 20-char width, 1 bullet per page, max 3 lines
+              limit = 20
               max_lines = 3
-              pages = re.split(r"(/%|/|\\n)", text)
+              pages = re.split(r"(/%|/)", text)
               rebuilt_pages = []
               for page in pages:
-                  if page in ("/%", "/", "\\n") or not page.strip():
+                  if page in ("/%", "/") or not page.strip():
                       rebuilt_pages.append(page)
                       continue
                   trailing = ""
@@ -90,25 +106,30 @@ jobs:
                   if m_trail:
                       trailing = m_trail.group(1)
                       page = page[:m_trail.start()]
-                  flat = page.replace("&", " ")
+                  flat = page.replace("&", " ").replace("\\n", " ")
                   flat = re.sub(r" {2,}", " ", flat).strip()
-                  sub_blocks = re.split(r"\s*(?<!^)(?=\*[A-Za-z0-9\"'(\[])", flat)
-                  page_lines = []
-                  for sb in sub_blocks:
-                      page_lines.extend(wrap_words(sb, limit))
-                  if len(page_lines) <= max_lines:
-                      rebuilt_pages.append("&".join(page_lines) + trailing)
-                  else:
-                      chunks = [page_lines[i:i+max_lines] for i in range(0, len(page_lines), max_lines)]
-                      prefix_m = re.match(r"^((?:\\[A-Za-z][0-9A-Za-z]?)+)", page.strip())
-                      prefix = prefix_m.group(1) if prefix_m else ""
-                      formatted_chunks = []
-                      for idx, ch in enumerate(chunks):
+
+                  prefix_m = re.match(r"^((?:\\[A-Za-z][0-9A-Za-z]?)+)", flat)
+                  prefix = prefix_m.group(1) if prefix_m else ""
+                  body = flat[len(prefix):].strip() if prefix else flat
+
+                  bullets = re.split(r"\s*(?<!^)(?=\*[A-Za-z0-9\"'(\[])", body)
+                  all_box_pages = []
+                  for b in bullets:
+                      b_lines = wrap_words(b, limit)
+                      if not b_lines:
+                          continue
+                      chunks = [b_lines[i:i+max_lines] for i in range(0, len(b_lines), max_lines)]
+                      for ch in chunks:
                           joined_ch = "&".join(ch)
-                          if idx > 0 and prefix and not joined_ch.startswith("\\"):
+                          if prefix and not joined_ch.startswith("\\"):
                               joined_ch = prefix + joined_ch
-                          formatted_chunks.append(joined_ch)
-                      rebuilt_pages.append("/".join(formatted_chunks) + trailing)
+                          all_box_pages.append(joined_ch)
+
+                  if all_box_pages:
+                      rebuilt_pages.append("/".join(all_box_pages) + trailing)
+                  else:
+                      rebuilt_pages.append(page + trailing)
               return "".join(rebuilt_pages)
 
           if os.path.exists("strings.json"):
@@ -146,15 +167,15 @@ jobs:
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add -A
-          git commit -m "Only wrap typewriter dialogue boxes & clean all HUD/menu & (v1.2.2)" || echo "No changes"
+          git commit -m "Combine v1.2.3 & v1.2.4 fixes: single-bullet pagination, top-line strip & choice padding (v1.2.5)" || echo "No changes"
           git push
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete v1.2.2 --cleanup-tag -y || true
-          gh release create v1.2.2 delta-romanian.zip \
-            --title "Deltarune Romanian Translation (Chapters 1–5) v1.2.2" \
-            --notes "Full Romanian translation pack for Deltarune (Chapters 1–5) on Android (DeltaQuick). Eliminated literal '&' characters from all HUD, menu, and save screens while preserving 21-char / 3-line dialogue pagination."
+          gh release delete v1.2.5 --cleanup-tag -y || true
+          gh release create v1.2.5 delta-romanian.zip \
+            --title "Deltarune Romanian Translation (Chapters 1–5) v1.2.5" \
+            --notes "Full Romanian translation pack for Deltarune (Chapters 1–5) on Android (DeltaQuick). Combines single-bullet dialogue box pagination (20-char width, max 3 lines), blank top-line removal, HUD/menu '&' cleanup, and SOUL heart choice cursor padding."
             
