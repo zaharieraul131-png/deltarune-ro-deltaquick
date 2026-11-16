@@ -188,15 +188,17 @@ jobs:
               if cur:
                   lines.append(cur)
               return lines
-          def layout_bullets(flat, max_px):
+                    def layout_bullets(flat, max_px):
               bullets = re.split(r"\s*(?<!^)(?=\*[A-Za-z0-9\"'(\[])", flat)
               if len(bullets) >= 3:
-                  bullets = [bullets.rstrip() + " " + bullets.lstrip().lstrip("*")] + bullets[2:]
+                  b1 = bullets.pop(0).rstrip()
+                  b2 = bullets.pop(0).lstrip().lstrip("*")
+                  bullets = [b1 + " " + b2] + bullets
               lines = []
               for b in bullets:
                   lines.extend(wrap_px(b, max_px))
               return lines
-
+              
           def solve_box(flat, has_face):
               # Pixel budgets: portrait box = 188px (~23-24 chars), full box = 216px (~27 chars)
               base_px = 188 if has_face else 216
