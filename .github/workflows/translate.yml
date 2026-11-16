@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Polish Menu Line-Breaks & All Dialogue Bullets (v1.1.1)
+      - name: Wrap Only Typewriter Dialogue & Clean All HUD/Menu & (v1.2.2)
         run: |
           python -u - << 'EOF'
           import json, os, re
@@ -45,12 +45,28 @@ jobs:
                   lines.append(cur)
               return lines
 
+          def is_typewriter_dialogue(key, text):
+              if re.search(r"\\C[0-9]", text):
+                  return False
+              if "DEVICE_CONTACT" in key:
+                  return True
+              # Real Deltarune dialogue boxes start with * or a portrait/speaker tag (\E0, \F1, \M0, etc.) or end with / or /%
+              stripped = text.strip()
+              if stripped.startswith("*") or re.match(r"^\\[A-Za-z][0-9A-Za-z]?\s*\*", stripped):
+                  return True
+              if stripped.endswith("/") or stripped.endswith("/%") or stripped.endswith("%"):
+                  return True
+              return False
+
           def reflow_dialogue(key, text):
               if not isinstance(text, str) or not text.strip():
                   return text
-              if re.search(r"\\C[0-9]", text):
-                  return text
-              if "DEVICE_" in key:
+
+              # Non-dialogue strings (HUD, menus, item names, save prompts) render '&' literally — replace with space
+              if not is_typewriter_dialogue(key, text):
+                  return re.sub(r"\s*&\s*", " ", text).strip()
+
+              if "DEVICE_CONTACT" in key:
                   text = re.sub(r"&([?!.,:;])", r"\1", text)
                   parts = re.split(r"(&|\\n)", text)
                   out = []
@@ -58,11 +74,11 @@ jobs:
                       if p in ("&", "\\n"):
                           out.append(p)
                       else:
-                          out.append("&".join(wrap_words(p, 19)) if p.strip() else p)
+                          out.append("&".join(wrap_words(p, 18)) if p.strip() else p)
                   return "".join(out)
 
-              limit = 24
-              max_lines = 4 if "obj_readable" in key else 3
+              limit = 21
+              max_lines = 3
               pages = re.split(r"(/%|/|\\n)", text)
               rebuilt_pages = []
               for page in pages:
@@ -76,7 +92,6 @@ jobs:
                       page = page[:m_trail.start()]
                   flat = page.replace("&", " ")
                   flat = re.sub(r" {2,}", " ", flat).strip()
-                  # Split on ANY mid-box bullet (*Word or *"Quote), even right after punctuation/tags!
                   sub_blocks = re.split(r"\s*(?<!^)(?=\*[A-Za-z0-9\"'(\[])", flat)
                   page_lines = []
                   for sb in sub_blocks:
@@ -118,7 +133,7 @@ jobs:
                       fixed += 1
               with open(fp, "w", encoding="utf-8") as f:
                   json.dump(data, f, ensure_ascii=False, indent=2)
-              print(f"{fp}: polished {fixed} entries")
+              print(f"{fp}: updated {fixed} entries")
           EOF
 
       - name: Pack Zip and Commit
@@ -131,15 +146,15 @@ jobs:
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add -A
-          git commit -m "Split all mid-box dialogue bullets & polish menu prompts (v1.1.1)" || echo "No changes"
+          git commit -m "Only wrap typewriter dialogue boxes & clean all HUD/menu & (v1.2.2)" || echo "No changes"
           git push
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete v1.1.1 --cleanup-tag -y || true
-          gh release create v1.1.1 delta-romanian.zip \
-            --title "Deltarune Romanian Translation (Chapters 1–5) v1.1.1" \
-            --notes "Full Romanian translation pack for Deltarune (Chapters 1–5) on Android (DeltaQuick). Polished Chapter Select menu prompts and aligned all mid-box dialogue bullets (*)."
+          gh release delete v1.2.2 --cleanup-tag -y || true
+          gh release create v1.2.2 delta-romanian.zip \
+            --title "Deltarune Romanian Translation (Chapters 1–5) v1.2.2" \
+            --notes "Full Romanian translation pack for Deltarune (Chapters 1–5) on Android (DeltaQuick). Eliminated literal '&' characters from all HUD, menu, and save screens while preserving 21-char / 3-line dialogue pagination."
             
