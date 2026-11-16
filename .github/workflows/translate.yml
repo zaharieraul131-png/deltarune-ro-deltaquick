@@ -1,4 +1,4 @@
-name: Clean Build & Publish v2.1.0
+name: Clean Build & Publish v2.1.1
 on:
   workflow_dispatch:
 
@@ -19,7 +19,7 @@ jobs:
 
       - run: pip install requests
 
-      - name: Full 5-Chapter Translation, Universal Portrait Fit & Audit (v2.1.0)
+      - name: Full 5-Chapter Translation, 168px Portrait Fit & Audit (v2.1.1)
         run: |
           BASE_COMMIT=$(git log --reverse --format="%H" -- chapter1/strings.json | head -n 1)
           git checkout "$BASE_COMMIT" -- strings.json chapter1 chapter2 chapter3 chapter4 chapter5
@@ -49,7 +49,6 @@ jobs:
           def clean_ro(t):
               for k, v in SUBS.items():
                   t = t.replace(k, v)
-              # Only split true camelCase (doamnaAlphys -> doamna Alphys), never normal Romanian words!
               return re.sub(r"([a-z])([A-Z])", r"\1 \2", t)
 
           def protect(v):
@@ -106,9 +105,7 @@ jobs:
               if len(parts) == len(batch):
                   return [(k, restore(part, toks, wu)) for (k, o, p, toks, wu), part in zip(batch, parts)]
               return [(k, restore(gt(p, sl), toks, wu)) for k, o, p, toks, wu in batch]
-              
-            
-          COMPACT_RULES = [
+                        COMPACT_RULES = [
               (r"\bde fapt\b", ""), (r"\bun pic\b", ""), (r"\bchiar acum\b", "acum"),
               (r"\bfoarte mult\b", "mult"), (r"\bfoarte\b", ""), (r"\bchiar\b", ""),
               (r"\bpe care\b", "ce"), (r"\bpentru ca\b", "ca"), (r"\bin acest\b", "in"),
@@ -158,9 +155,8 @@ jobs:
               return lines
 
           def solve_box(flat):
-              # Universal 180px-192px portrait-safe budget so GameMaker NEVER auto-wraps a 4th line
-              base_px = 180
-              max_allowed_px = 192
+              base_px = 156
+              max_allowed_px = 168
               candidate = flat
               for step in range(500):
                   w_px = min(base_px + (step % 4) * 4, max_allowed_px)
@@ -184,8 +180,7 @@ jobs:
               if not isinstance(ro_text, str) or not ro_text.strip():
                   return ro_text
               if "#" in orig_en and not orig_en.strip().startswith("*"):
-                  parts = [p.strip() for p in ro_text.split("#")]
-                  return "#".join(("   " + p[:14].strip()) if p else p for p in parts)
+                  return ro_text
               if re.search(r"\\C[1-4]", ro_text):
                   return re.sub(r"(\\C[1-4])\s*([^\n\\&/#]+)", lambda m: f"{m.group(1)}   {m.group(2).strip()}", ro_text)
               is_dlg = ("DEVICE_CONTACT" in key) or orig_en.strip().startswith("*") or bool(re.match(r"^\\[A-Za-z][0-9A-Za-z]?\s*\*", orig_en.strip())) or orig_en.strip().endswith(("/", "/%", "%"))
@@ -263,7 +258,7 @@ jobs:
           print(f"Total violations across all 5 chapters: {len(audit_errors)}")
           if audit_errors:
               sys.exit(1)
-          print("100% VERIFIED — ALL ROMANIAN WORDS INTACT & ZERO BORDER OVERFLOWS!")
+          print("100% VERIFIED — ALL ROMANIAN WORDS INTACT, CHOICES FIXED & ZERO BORDER OVERFLOWS!")
           EOF
 
       - name: Pack Zip and Commit
@@ -276,16 +271,16 @@ jobs:
           git config user.name "zaharieraul131-png"
           git config user.email "zaharieraul131-png@://github.com"
           git add -A
-          git commit -m "Universal portrait-safe width & intact Romanian words (v2.1.0)" || echo "No changes"
+          git commit -m "168px portrait width, untouched # choices & intact Romanian words (v2.1.1)" || echo "No changes"
           git push
 
-      - name: Publish v2.1.0 GitHub Release
+      - name: Publish v2.1.1 GitHub Release
         env:
           GH_TOKEN: ${{ secrets.MY_TOKEN }}
         run: |
-          gh release delete v2.1.0 --cleanup-tag -y || true
-          git push origin :refs/tags/v2.1.0 || true
-          gh release create v2.1.0 delta-romanian.zip \
-            --title "Deltarune Romanian Translation (Chapters 1–5) v2.1.0" \
-            --notes "Full Romanian translation pack for Deltarune (Chapters 1–5) on Android (DeltaQuick). Keeps all Romanian words intact, uses universal 180-192px portrait-safe width so no 4th line wraps onto the bottom border, and maintains 100% cutscene parity."
+          gh release delete v2.1.1 --cleanup-tag -y || true
+          git push origin :refs/tags/v2.1.1 || true
+          gh release create v2.1.1 delta-romanian.zip \
+            --title "Deltarune Romanian Translation (Chapters 1–5) v2.1.1" \
+            --notes "Full Romanian translation pack for Deltarune (Chapters 1–5) on Android (DeltaQuick). Fixed '#' choice alignment (Da/Nu), prevented GameMaker double-wrapping with 168px portrait-safe width, and kept all Romanian words intact."
             
